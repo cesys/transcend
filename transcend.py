@@ -2,10 +2,13 @@
 #
 # Transcend client
 #
+
 import argparse
+import atexit
 import json
 import os
 import random
+import shutil
 import smb
 import socket
 
@@ -21,7 +24,7 @@ server_ip       = '172.31.130.110'          # Must point to the correct IP addre
 domain_name     = ''                        # Safe to leave blank, or fill in the domain used for your remote server
 shared_folder   = 'transcend'               # Set to the shared folder name
 index_filename  = '.index'                  # Index filename
-tmp_folder      = '/tmp'                    # Temporary folder
+tmp_folder      = '/tmp/.transcend'         # Temporary folder
 server_path     = ''                        # Path for transcend files in the server
 verbose         = False                     # Verbose flag
 key_length      = 8                         # Key lenght
@@ -64,7 +67,6 @@ def download(conn, path, filename, dest, service_name):
                 fw.write(line)
             fw.close()
             if verbose: print 'Download finished'
-            conn.close()
             return True
         except smb.smb_structs.OperationFailure:
             if verbose: print "File " + path + filename + " doesn't exists."
@@ -79,7 +81,6 @@ def upload(conn, path, filename, source, service_name):
         with open(source, 'r') as file_obj:
             filesize = conn.storeFile(service_name, path + filename, file_obj)
         if verbose: print 'Upload finished'
-        conn.close()
 
 def loadindex(conn):
     index_path_filename = tmp_folder + "/" +index_filename
@@ -96,41 +97,51 @@ def saveindex(conn, index):
 
 def upload_file(args):
     conn = connect()
-    index = loadindex(conn)
-    while True:
-        key = generate_key()
-        if key not in index.keys():
-            break
-    print 'Uploading file ' + args.key +  "..."
     try:
-        upload(conn, server_path, key, args.key, shared_folder)
-    except IOError:
-        print "Cannot retrieve file " + args.key
-        return
-    data = dict()
-    data["filename"] = args.key
-    index[key] = data
-    saveindex(conn, index)
-    print "Done."
-    print "Transcend key: " + key
+        index = loadindex(conn)
+        while True:
+            key = generate_key()
+            if key not in index.keys():
+                break
+        print 'Uploading file ' + args.key +  "..."
+        try:
+            upload(conn, server_path, key, args.key, shared_folder)
+        except IOError:
+            print "Cannot retrieve file " + args.key
+            return
+        data = dict()
+        data["filename"] = args.key
+        index[key] = data
+        saveindex(conn, index)
+        print "Done."
+        print "Transcend key: " + key
+    finally:
+        conn.close()
 
 def download_file(args):
     conn = connect()
-    if not check_key(args.key):
-        print "Malformed key!"
-        return
-    index = loadindex(conn)
-    if args.key in index.keys():
-        filename = index[args.key]["filename"]
-        print 'Downloading file ', args.key, "..."
-        if not download(conn, server_path, index_filename, filename, shared_folder):
-            print "Cannot retrieve file. Datastore corrupted."
+    try:
+        if not check_key(args.key):
+            print "Malformed key!"
             return
-    else:
-        print "Key " + args.key + " doesn't exist in the datastore."
-        return
-    saveindex(conn, index)
-    print "Done."
+        index = loadindex(conn)
+        if args.key in index.keys():
+            filename = index[args.key]["filename"]
+            print 'Downloading file ' + filename + " ..."
+            if not download(conn, server_path, args.key, filename, shared_folder):
+                print "Cannot retrieve file. Datastore corrupted."
+                return
+        else:
+            print "Key " + args.key + " doesn't exist in the datastore."
+            return
+        saveindex(conn, index)
+        print "Done."
+    finally:
+        conn.close()
+
+def init(args):
+    if not os.path.exists(tmp_folder):
+        os.makedirs(tmp_folder)
 
 def dispatch(args):
     global verbose
@@ -140,7 +151,13 @@ def dispatch(args):
     else:
         download_file(args)
 
+def exit_handler():
+    # Dispose resources
+    if os.path.exists(tmp_folder):
+        shutil.rmtree(tmp_folder)
+
 def main():
+    atexit.register(exit_handler)
     parser = argparse.ArgumentParser(description='Transcend is a tool to upload/download files '
                                                  'to/from a server through a simple ID in a transparent way')
     parser.add_argument('key', type=str,
@@ -151,6 +168,7 @@ def main():
                         help='verbose')
 
     args = parser.parse_args()
+    init(args)
     dispatch(args)
 
 
