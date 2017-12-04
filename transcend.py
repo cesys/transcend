@@ -18,6 +18,7 @@ from cStringIO import StringIO
 username        = 'GUEST'                   # Username
 password        = ''                        # Password
 ports           = [2001, 445]               # can be 2000 or 445 to avoid firewalls
+conn_timeout    = 15
 client_name     = 'testclient'              # Usually safe to use 'testclient'
 server_name     = 'TRANSCEND'               # Must match the NetBIOS name of the remote server
 server_ip       = '172.31.130.110'          # Must point to the correct IP address
@@ -46,10 +47,10 @@ def connect():
                          is_direct_tcp=True)
     for port in ports:
         try:
-            if conn.connect(server_ip, port):
+            if conn.connect(server_ip, port, timeout = conn_timeout):
                 break
         except socket.timeout:
-            print "Socket timeout: samba protocol is not responding on port " + port
+            print "Socket timeout: samba protocol is not responding on port " + str(port)
     return conn
 
 def download(conn, path, filename, dest, service_name):
